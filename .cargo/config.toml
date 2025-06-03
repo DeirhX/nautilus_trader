@@ -18,7 +18,7 @@ rustflags = [
 ]
 
 [target.x86_64-pc-windows-msvc]
-linker = "clang-cl"
+linker = "lld-link"
 rustflags = [
     "-C", "target-feature=+crt-static",
 ]

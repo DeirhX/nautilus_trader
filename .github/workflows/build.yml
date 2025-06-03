@@ -306,7 +306,7 @@ jobs:
         uses: ./.github/actions/common-setup
         with:
           python-version: ${{ matrix.python-version }}
-          free-disk-space: "true"
+          free-disk-space: "false"
 
       - name: Use clang-cl
         run: |
