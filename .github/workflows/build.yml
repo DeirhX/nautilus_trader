@@ -310,15 +310,12 @@ jobs:
 
       - name: Use clang-cl
         run: |
-          echo "$Env:ProgramFiles\LLVM\bin" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
-          echo "CC=clang-cl"  | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
-          echo "CXX=clang-cl" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
+          echo 'CC=clang-cl'  >> "$GITHUB_ENV"
+          echo 'CXX=clang-cl' >> "$GITHUB_ENV"
 
-      - name: Use clang-cl
-        run: |
-          echo "$Env:ProgramFiles\LLVM\bin" >> $Env:GITHUB_PATH
-          echo "CC=clang-cl"  >> $Env:GITHUB_ENV
-          echo "CXX=clang-cl" >> $Env:GITHUB_ENV
+      - name: Show compiler
+        run: '"C:\Program Files\LLVM\bin\clang-cl" --version | head -n 1'
 
       - name: Build and install wheel
         uses: ./.github/actions/common-wheel-build
