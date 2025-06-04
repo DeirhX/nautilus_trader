@@ -303,11 +303,21 @@ jobs:
         # https://github.com/actions/checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Temporary clear build cache
+      - name: Comprehensive cache clearing
         run: |
+          # Clear Rust target directory
           if [ -d "target" ]; then
             rm -rf target
           fi
+
+          # Clear Cargo cache that might contain build script artifacts
+          if [ -d "$HOME/.cargo/registry/cache" ]; then
+            rm -rf "$HOME/.cargo/registry/cache"
+          fi
+
+          # Clear any cmake caches in temp locations
+          find /c/Users/runneradmin -name "CMakeCache.txt" -delete 2>/dev/null || true
+          find /c/Users/runneradmin -name "CMakeFiles" -type d -exec rm -rf {} + 2>/dev/null || true
 
       - name: Common setup
         uses: ./.github/actions/common-setup
@@ -319,6 +329,10 @@ jobs:
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           vsversion: "2019"  # Pin to known working version
+
+      - name: Force CMake generator
+        run: |
+          echo "CMAKE_GENERATOR=Visual Studio 16 2019" >> $GITHUB_ENV
 
       - name: Build and install wheel
         uses: ./.github/actions/common-wheel-build
