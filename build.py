@@ -94,9 +94,13 @@ if IS_LINUX and IS_ARM64:
 if IS_WINDOWS:
     # Linker error 1181
     # https://docs.microsoft.com/en-US/cpp/error-messages/tool-errors/linker-tools-error-lnk1181?view=msvc-170&viewFallbackFrom=vs-2019
-    os.environ["CC"] = "clang-cl"
-    os.environ["CXX"] = "clang-cl"
-    os.environ["LD"] = "lld-link"
+    # Only set compiler environment variables if not already set (e.g., by CI)
+    if "CC" not in os.environ:
+        os.environ["CC"] = "clang-cl"
+    if "CXX" not in os.environ:
+        os.environ["CXX"] = "clang-cl"
+    if "LD" not in os.environ:
+        os.environ["LD"] = "lld-link"
 
     RUST_LIB_PFX = ""
     RUST_STATIC_LIB_EXT = "lib"
