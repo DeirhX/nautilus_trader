@@ -311,7 +311,7 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
-          vsversion: '2019'  # Pin to known working version
+          vsversion: "2022"  # Pin to known working version
 
       - name: Build and install wheel
         uses: ./.github/actions/common-wheel-build
