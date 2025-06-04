@@ -308,25 +308,28 @@ jobs:
           python-version: ${{ matrix.python-version }}
           free-disk-space: "false"
 
-      - name: Make clang-cl the default “cl”
-        shell: bash
+      - name: Setup LLVM toolchain (fake cl/link → clang-cl/lld-link)
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/bin"
-          cat >"$GITHUB_WORKSPACE/bin/cl.cmd" <<'EOF'
-          @echo off
-          "C:\Program Files\LLVM\bin\clang-cl.exe" %*
-          EOF
+          LLVM="C:/Program Files/LLVM/bin"
+          FAKE="$GITHUB_WORKSPACE/fake_msvc"
+          mkdir -p "$FAKE"
+          cp "$LLVM/clang-cl.exe" "$FAKE/cl.exe"
+          cp "$LLVM/lld-link.exe"  "$FAKE/link.exe"
 
-          echo "$GITHUB_WORKSPACE/bin" > "$GITHUB_PATH"
-          chmod +x "$GITHUB_WORKSPACE/bin/cl.cmd"
+          echo "$FAKE"                      >> "$GITHUB_PATH"
+          echo "C:/Program Files/LLVM/bin"  >> "$GITHUB_PATH"
 
-      - name: Use clang-cl
-        run: |
-          echo "C:\Program Files\LLVM\bin" >> "$GITHUB_PATH"
-          echo "CC=clang-cl"  >> "$GITHUB_ENV"
-          echo "CXX=clang-cl" >> "$GITHUB_ENV"
-          echo "DISTUTILS_USE_SDK=1" >> "$GITHUB_ENV"
-          echo "CFLAGS=-D__SIZEOF_INT128__=0" >> "$GITHUB_ENV"
+          {
+            echo 'CC=clang-cl'
+            echo 'CXX=clang-cl'
+            echo 'LD=lld-link'
+            echo 'CL=clang-cl'
+            echo 'AR=llvm-ar'
+            echo 'NM=llvm-nm'
+            echo 'DISTUTILS_USE_SDK=1'
+            echo 'MSSdk=1'
+            echo 'CFLAGS=-D__SIZEOF_INT128__=0'
+          } >> "$GITHUB_ENV"
 
       - name: Show compiler
         run: '"C:\Program Files\LLVM\bin\clang-cl" --version | head -n 1'
