@@ -326,7 +326,7 @@ jobs:
           echo "CC=clang-cl"  >> "$GITHUB_ENV"
           echo "CXX=clang-cl" >> "$GITHUB_ENV"
           echo "DISTUTILS_USE_SDK=1" >> "$GITHUB_ENV"
-          echo "CFLAGS=/D__SIZEOF_INT128__=0" >> "$GITHUB_ENV"
+          echo "CFLAGS=-D__SIZEOF_INT128__=0" >> "$GITHUB_ENV"
 
       - name: Show compiler
         run: '"C:\Program Files\LLVM\bin\clang-cl" --version | head -n 1'
