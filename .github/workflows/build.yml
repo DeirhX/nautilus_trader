@@ -310,7 +310,7 @@ jobs:
 
       - name: Use clang-cl
         run: |
-          echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
+          echo 'C:\Program Files\LLVM\bin' > "$GITHUB_PATH"
           echo 'CC=clang-cl'  >> "$GITHUB_ENV"
           echo 'CXX=clang-cl' >> "$GITHUB_ENV"
 
