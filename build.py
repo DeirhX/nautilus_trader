@@ -95,18 +95,9 @@ if IS_WINDOWS:
     # Linker error 1181
     # https://docs.microsoft.com/en-US/cpp/error-messages/tool-errors/linker-tools-error-lnk1181?view=msvc-170&viewFallbackFrom=vs-2019
     # Only set compiler environment variables if not already set (e.g., by CI)
-    if "CC" not in os.environ:
-        os.environ["CC"] = "clang-cl"
-    if "CXX" not in os.environ:
-        os.environ["CXX"] = "clang-cl"
-    if "LD" not in os.environ:
-        os.environ["LD"] = "lld-link"
-
-    # Force cc crate to treat clang-cl as regular clang to avoid MSVC-specific flag handling
     os.environ["CC_ENABLE_DEBUG_OUTPUT"] = "1"
-    # Override cc crate's compiler detection to prevent MSVC-style -Fo usage
-    os.environ["CC_x86_64_pc_windows_msvc"] = "clang"
-    os.environ["CXX_x86_64_pc_windows_msvc"] = "clang++"
+    os.environ["CC_x86_64_pc_windows_msvc"] = "clang-cl"
+    os.environ["CXX_x86_64_pc_windows_msvc"] = "clang-cl"
 
     RUST_LIB_PFX = ""
     RUST_STATIC_LIB_EXT = "lib"
