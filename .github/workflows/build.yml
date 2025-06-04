@@ -308,11 +308,25 @@ jobs:
           python-version: ${{ matrix.python-version }}
           free-disk-space: "false"
 
+      - name: Make clang-cl the default “cl”
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bin"
+          cat >"$GITHUB_WORKSPACE/bin/cl.cmd" <<'EOF'
+          @echo off
+          "C:\Program Files\LLVM\bin\clang-cl.exe" %*
+          EOF
+
+          echo "$GITHUB_WORKSPACE/bin" > "$GITHUB_PATH"
+          chmod +x "$GITHUB_WORKSPACE/bin/cl.cmd"
+
       - name: Use clang-cl
         run: |
-          echo 'C:\Program Files\LLVM\bin' > "$GITHUB_PATH"
-          echo 'CC=clang-cl'  >> "$GITHUB_ENV"
-          echo 'CXX=clang-cl' >> "$GITHUB_ENV"
+          echo "C:\Program Files\LLVM\bin" >> "$GITHUB_PATH"
+          echo "CC=clang-cl"  >> "$GITHUB_ENV"
+          echo "CXX=clang-cl" >> "$GITHUB_ENV"
+          echo "DISTUTILS_USE_SDK=1" >> "$GITHUB_ENV"
+          echo "CFLAGS=/D__SIZEOF_INT128__=0" >> "$GITHUB_ENV"
 
       - name: Show compiler
         run: '"C:\Program Files\LLVM\bin\clang-cl" --version | head -n 1'
