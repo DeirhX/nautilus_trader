@@ -102,11 +102,9 @@ if IS_WINDOWS:
     if "LD" not in os.environ:
         os.environ["LD"] = "lld-link"
 
-    # Fix for clang-cl compilation issues with cc crate
-    # Force cc crate to compile files individually to avoid -Fo flag issues
-    os.environ["CC_MSVC_COMPILE_CONCURRENCY"] = "1"
-    os.environ["CXX_MSVC_COMPILE_CONCURRENCY"] = "1"
-    os.environ["CC_ENABLE_DEBUG_OUTPUT"] = "0"
+    os.environ["CRATE_CC_NO_DEFAULTS"] = "1"
+    os.environ["CC_SHELL_ESCAPED_FLAGS"] = "1"
+    os.environ["CC_MSVC_USE_SLASH_FLAGS"] = "1"
 
     RUST_LIB_PFX = ""
     RUST_STATIC_LIB_EXT = "lib"
