@@ -102,6 +102,10 @@ if IS_WINDOWS:
     if "LD" not in os.environ:
         os.environ["LD"] = "lld-link"
 
+    # Fix for clang-cl compilation issues with cc crate
+    # Force cc crate to not use flag with multiple source files
+    os.environ["CC_ENABLE_DEBUG_OUTPUT"] = "1"
+
     RUST_LIB_PFX = ""
     RUST_STATIC_LIB_EXT = "lib"
     RUST_DYLIB_EXT = "dll"
@@ -228,27 +232,27 @@ def _build_extensions() -> list[Extension]:
 
     if IS_WINDOWS:
         extra_link_args += [
-            "AdvAPI32.Lib",
+            "advapi32.lib",
             "bcrypt.lib",
-            "Crypt32.lib",
-            "Iphlpapi.lib",
-            "Kernel32.lib",
+            "crypt32.lib",
+            "iphlpapi.lib",
+            "kernel32.lib",
             "ncrypt.lib",
-            "Netapi32.lib",
+            "netapi32.lib",
             "ntdll.lib",
-            "Ole32.lib",
-            "OleAut32.lib",
-            "Pdh.lib",
-            "PowrProf.lib",
-            "Propsys.lib",
-            "Psapi.lib",
+            "ole32.lib",
+            "oleaut32.lib",
+            "pdh.lib",
+            "powrprof.lib",
+            "propsys.lib",
+            "psapi.lib",
             "runtimeobject.lib",
             "schannel.lib",
             "secur32.lib",
-            "Shell32.lib",
-            "User32.Lib",
-            "UserEnv.Lib",
-            "WS2_32.Lib",
+            "shell32.lib",
+            "user32.lib",
+            "userenv.lib",
+            "ws2_32.lib",
         ]
 
     print("Creating C extension modules...")
