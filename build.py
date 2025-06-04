@@ -95,10 +95,6 @@ if IS_WINDOWS:
     # Linker error 1181
     # https://docs.microsoft.com/en-US/cpp/error-messages/tool-errors/linker-tools-error-lnk1181?view=msvc-170&viewFallbackFrom=vs-2019
     # Only set compiler environment variables if not already set (e.g., by CI)
-    os.environ["CC_ENABLE_DEBUG_OUTPUT"] = "1"
-    os.environ["CC_x86_64_pc_windows_msvc"] = "clang-cl"
-    os.environ["CXX_x86_64_pc_windows_msvc"] = "clang-cl"
-
     RUST_LIB_PFX = ""
     RUST_STATIC_LIB_EXT = "lib"
     RUST_DYLIB_EXT = "dll"

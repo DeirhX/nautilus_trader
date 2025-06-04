@@ -267,7 +267,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - windows-latest
+          - windows-2019
         python-version:
           - "3.11"
           - "3.12"
@@ -307,33 +307,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           free-disk-space: "false"
-
-      - name: Setup LLVM toolchain (fake cl/link → clang-cl/lld-link)
-        run: |
-          LLVM="C:/Program Files/LLVM/bin"
-          FAKE="$GITHUB_WORKSPACE/fake_msvc"
-          mkdir -p "$FAKE"
-          cp "$LLVM/clang-cl.exe" "$FAKE/cl.exe"
-          cp "$LLVM/lld-link.exe"  "$FAKE/link.exe"
-
-          echo "$FAKE"                      >> "$GITHUB_PATH"
-          echo "C:/Program Files/LLVM/bin"  >> "$GITHUB_PATH"
-
-          {
-            echo 'CC=clang-cl'
-            echo 'CXX=clang-cl'
-            echo 'LD=lld-link'
-            echo 'CL=clang-cl'
-            echo 'AR=llvm-ar'
-            echo 'NM=llvm-nm'
-            echo 'DISTUTILS_USE_SDK=1'
-            echo 'MSSdk=1'
-            echo 'CFLAGS=-D__SIZEOF_INT128__=0'
-            echo 'RUSTC_WRAPPER='
-          } >> "$GITHUB_ENV"
-
-      - name: Show compiler
-        run: '"C:\Program Files\LLVM\bin\clang-cl" --version | head -n 1'
 
       - name: Build and install wheel
         uses: ./.github/actions/common-wheel-build
