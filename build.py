@@ -102,9 +102,11 @@ if IS_WINDOWS:
     if "LD" not in os.environ:
         os.environ["LD"] = "lld-link"
 
-    os.environ["CRATE_CC_NO_DEFAULTS"] = "1"
-    os.environ["CC_SHELL_ESCAPED_FLAGS"] = "1"
-    os.environ["CC_MSVC_USE_SLASH_FLAGS"] = "1"
+    # Force cc crate to treat clang-cl as regular clang to avoid MSVC-specific flag handling
+    os.environ["CC_ENABLE_DEBUG_OUTPUT"] = "1"
+    # Override cc crate's compiler detection to prevent MSVC-style -Fo usage
+    os.environ["CC_x86_64_pc_windows_msvc"] = "clang"
+    os.environ["CXX_x86_64_pc_windows_msvc"] = "clang++"
 
     RUST_LIB_PFX = ""
     RUST_STATIC_LIB_EXT = "lib"
