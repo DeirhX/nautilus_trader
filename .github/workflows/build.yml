@@ -289,7 +289,7 @@ jobs:
     #   - pre-commit
     env:
       BUILD_MODE: debug
-      HIGH_PRECISION: true
+      HIGH_PRECISION: false
       PARALLEL_BUILD: false
       RUST_BACKTRACE: 1
     steps:
