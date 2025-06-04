@@ -49,14 +49,6 @@ fn main() {
         let mut config_c = cbindgen::Config::from_file("cbindgen.toml")
             .expect("unable to find cbindgen.toml configuration file");
 
-        #[cfg(feature = "high-precision")]
-        {
-            if let Some(mut includes) = config_c.after_includes {
-                includes.insert_str(0, "\n#define HIGH_PRECISION\n");
-                config_c.after_includes = Some(includes);
-            }
-        }
-
         let c_header_path = crate_dir.join("../../nautilus_trader/core/includes/model.h");
         cbindgen::generate_with_config(&crate_dir, config_c)
             .expect("unable to generate bindings")
