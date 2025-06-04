@@ -47,12 +47,12 @@ DRY_RUN = bool(os.getenv("DRY_RUN", ""))
 # Precision mode configuration
 # https://nautilustrader.io/docs/nightly/getting_started/installation#precision-mode
 HIGH_PRECISION = os.getenv("HIGH_PRECISION", "true").lower() == "true"
-# if IS_WINDOWS and HIGH_PRECISION:
-#     print(
-#         "Warning: high-precision mode not supported on Windows (128-bit integers unavailable)\n"
-#         "Forcing standard-precision (64-bit) mode",
-#     )
-#     HIGH_PRECISION = False
+if IS_WINDOWS and HIGH_PRECISION:
+    print(
+        "Warning: high-precision mode not supported on Windows (128-bit integers unavailable)\n"
+        "Forcing standard-precision (64-bit) mode",
+    )
+    HIGH_PRECISION = False
 
 if PROFILE_MODE:
     # For subsequent debugging, the C source needs to be in the same tree as
