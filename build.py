@@ -199,8 +199,10 @@ def _build_extensions() -> list[Extension]:
     # From the Cython docs: "For the time being, it is just a warning that you can ignore."
     define_macros: list[tuple[str, str | None]] = [
         ("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION"),
-        ("HIGH_PRECISION", str(int(HIGH_PRECISION))),
     ]
+
+    if HIGH_PRECISION:
+        define_macros.append(("HIGH_PRECISION", None))
 
     if PROFILE_MODE or ANNOTATION_MODE:
         # Profiling requires special macro directives
