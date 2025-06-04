@@ -5,7 +5,16 @@ includes = []
 sys_includes = ["stdint.h", "Python.h"]
 no_includes = true
 tab_width = 4
-after_includes = "\n#ifdef __SIZEOF_INT128__\n    typedef __uint128_t uint128_t;\n    typedef __int128_t int128_t;\n#endif"
+after_includes = """\n
+#ifdef HIGH_PRECISION      /* only when the Rust feature is enabled           */
+  /* Clang & GCC both understand __int128.  CL on Windows (MSVC) does not,
+     but when we compile with clang-cl (or on *nix) it works fine.            */
+  #ifdef __SIZEOF_INT128__ /* defined by all targets that actually support it */
+    typedef __uint128_t uint128_t;
+    typedef  __int128_t  int128_t;
+  #endif
+#endif
+"""
 
 [defines]
 "feature = high-precision" = "HIGH_PRECISION"

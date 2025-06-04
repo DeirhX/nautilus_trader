@@ -5,10 +5,16 @@
 #include <stdint.h>
 #include <Python.h>
 
-#ifdef __SIZEOF_INT128__
+
+#ifdef HIGH_PRECISION      /* only when the Rust feature is enabled           */
+  /* Clang & GCC both understand __int128.  CL on Windows (MSVC) does not,
+     but when we compile with clang-cl (or on *nix) it works fine.            */
+  #ifdef __SIZEOF_INT128__ /* defined by all targets that actually support it */
     typedef __uint128_t uint128_t;
-    typedef __int128_t int128_t;
+    typedef  __int128_t  int128_t;
+  #endif
 #endif
+
 
 #define DEPTH10_LEN 10
 
