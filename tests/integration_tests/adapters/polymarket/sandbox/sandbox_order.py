@@ -26,7 +26,7 @@ def place_order() -> None:
 
     params = BalanceAllowanceParams(
         asset_type=AssetType.COLLATERAL,
-        signature_type=0,
+        signature_type=2,
     )
 
     print(f"Updating {params}")

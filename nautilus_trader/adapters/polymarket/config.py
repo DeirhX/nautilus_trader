@@ -32,7 +32,7 @@ class PolymarketDataClientConfig(LiveDataClientConfig, frozen=True):
     private_key : str, optional
         The private key for the wallet on the **Polygon** network.
         If ``None`` then will source the `POLYMARKET_PK` environment variable.
-    signature_type : int, default 0 (EOA)
+    signature_type : int, default 2 (Browser EOA)
         The Polymarket signature type.
     funder : str, optional
         The wallet address (public key) on the **Polygon** network used for funding USDC.
@@ -64,7 +64,7 @@ class PolymarketDataClientConfig(LiveDataClientConfig, frozen=True):
 
     venue: Venue = POLYMARKET_VENUE
     private_key: str | None = None
-    signature_type: int = 0
+    signature_type: int = 2
     funder: str | None = None
     api_key: str | None = None
     api_secret: str | None = None
@@ -88,7 +88,7 @@ class PolymarketExecClientConfig(LiveExecClientConfig, frozen=True):
     private_key : str, optional
         The private key for the wallet on the **Polygon** network.
         If ``None`` then will source the `POLYMARKET_PK` environment variable.
-    signature_type : int, default 0 (EOA)
+    signature_type : int, default 2 (Browser EOA)
         The Polymarket signature type.
     funder : str, optional
         The wallet address (public key) on the **Polygon** network used for funding USDC.
@@ -124,7 +124,7 @@ class PolymarketExecClientConfig(LiveExecClientConfig, frozen=True):
 
     venue: Venue = POLYMARKET_VENUE
     private_key: str | None = None
-    signature_type: int = 0
+    signature_type: int = 2
     funder: str | None = None
     api_key: str | None = None
     api_secret: str | None = None

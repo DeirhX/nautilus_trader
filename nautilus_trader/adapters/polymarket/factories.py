@@ -46,7 +46,7 @@ def get_polymarket_http_client(
     passphrase: str | None = None,
     base_url: str | None = None,
     chain_id: int = POLYGON,
-    signature_type: int = 0,
+    signature_type: int = 2,
     private_key: str | None = None,
     funder: str | None = None,
 ) -> ClobClient:
@@ -67,7 +67,7 @@ def get_polymarket_http_client(
         The base URL for the API endpoints.
     chain_id : int, default POLYGON
         The chain ID for the client.
-    signature_type : int, default 0 (EOA)
+    signature_type : int, default 2 (Browser EOA)
         The Polymarket signature type.
     private_key : str, optional
         The private key for the wallet on the **Polygon** network.
