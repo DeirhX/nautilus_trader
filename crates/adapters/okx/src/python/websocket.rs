@@ -228,7 +228,9 @@ impl OKXWebSocketClient {
 
             let stream = client.stream();
 
+            // Keep client alive in the spawned task to prevent handler from dropping
             tokio::spawn(async move {
+                let _client = client;
                 tokio::pin!(stream);
 
                 while let Some(msg) = stream.next().await {
@@ -283,6 +285,7 @@ impl OKXWebSocketClient {
                             call_python_with_data(&callback, |py| msg.into_py_any(py));
                         }
                         NautilusWsMessage::Reconnected => {} // Nothing to handle
+                        NautilusWsMessage::Authenticated => {} // Nothing to handle
                         NautilusWsMessage::Error(msg) => {
                             call_python_with_data(&callback, |py| msg.into_py_any(py));
                         }

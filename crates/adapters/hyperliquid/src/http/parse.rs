@@ -190,7 +190,7 @@ use nautilus_model::{
 
 use crate::common::consts::HYPERLIQUID_VENUE;
 
-fn get_currency(code: &str) -> Currency {
+pub fn get_currency(code: &str) -> Currency {
     Currency::try_from_str(code).unwrap_or_else(|| {
         let currency = Currency::new(code, 8, 0, code, CurrencyType::Crypto);
         if let Err(e) = Currency::register(currency, false) {
@@ -813,7 +813,7 @@ pub fn parse_position_status_report(
 
     // Deserialize the position data
     let asset_position: AssetPosition = serde_json::from_value(position_data.clone())
-        .context("Failed to deserialize AssetPosition")?;
+        .context("failed to deserialize AssetPosition")?;
 
     let position = &asset_position.position;
     let instrument_id = instrument.id();
@@ -831,7 +831,7 @@ pub fn parse_position_status_report(
     let quantity = Quantity::new(
         quantity_value
             .to_f64()
-            .context("Failed to convert quantity to f64")?,
+            .context("failed to convert quantity to f64")?,
         instrument.size_precision(),
     );
 

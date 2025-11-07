@@ -573,11 +573,13 @@ impl BybitWebSocketClient {
         order_side,
         order_type,
         quantity,
+        is_quote_quantity=false,
         time_in_force=None,
         price=None,
         trigger_price=None,
         post_only=None,
         reduce_only=None,
+        is_leverage=false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn py_submit_order<'py>(
@@ -589,11 +591,13 @@ impl BybitWebSocketClient {
         order_side: OrderSide,
         order_type: OrderType,
         quantity: Quantity,
+        is_quote_quantity: bool,
         time_in_force: Option<TimeInForce>,
         price: Option<Price>,
         trigger_price: Option<Price>,
         post_only: Option<bool>,
         reduce_only: Option<bool>,
+        is_leverage: bool,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.clone();
 
@@ -606,11 +610,13 @@ impl BybitWebSocketClient {
                     order_side,
                     order_type,
                     quantity,
+                    is_quote_quantity,
                     time_in_force,
                     price,
                     trigger_price,
                     post_only,
                     reduce_only,
+                    is_leverage,
                 )
                 .await
                 .map_err(to_pyruntime_err)?;
@@ -714,6 +720,21 @@ impl BybitWebSocketClient {
     }
 
     #[pyo3(name = "build_place_order_params")]
+    #[pyo3(signature = (
+        product_type,
+        instrument_id,
+        client_order_id,
+        order_side,
+        order_type,
+        quantity,
+        is_quote_quantity=false,
+        time_in_force=None,
+        price=None,
+        trigger_price=None,
+        post_only=None,
+        reduce_only=None,
+        is_leverage=false,
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn py_build_place_order_params(
         &self,
@@ -723,11 +744,13 @@ impl BybitWebSocketClient {
         order_side: OrderSide,
         order_type: OrderType,
         quantity: Quantity,
+        is_quote_quantity: bool,
         time_in_force: Option<TimeInForce>,
         price: Option<Price>,
         trigger_price: Option<Price>,
         post_only: Option<bool>,
         reduce_only: Option<bool>,
+        is_leverage: bool,
     ) -> PyResult<crate::python::params::BybitWsPlaceOrderParams> {
         let params = self
             .build_place_order_params(
@@ -737,11 +760,13 @@ impl BybitWebSocketClient {
                 order_side,
                 order_type,
                 quantity,
+                is_quote_quantity,
                 time_in_force,
                 price,
                 trigger_price,
                 post_only,
                 reduce_only,
+                is_leverage,
             )
             .map_err(to_pyruntime_err)?;
         Ok(params.into())

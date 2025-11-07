@@ -32,7 +32,7 @@ use nautilus_model::{
     identifiers::{AccountId, ClientOrderId, InstrumentId, TradeId, VenueOrderId},
     instruments::{Instrument, any::InstrumentAny},
     reports::{FillReport, OrderStatusReport, PositionStatusReport},
-    types::{AccountBalance, Currency, Money, Price, Quantity},
+    types::{AccountBalance, Money, Price, Quantity},
 };
 use rust_decimal::Decimal;
 
@@ -43,7 +43,10 @@ use super::messages::{
 };
 use crate::common::{
     enums::{BybitOrderStatus, BybitOrderType, BybitTimeInForce},
-    parse::{parse_millis_timestamp, parse_price_with_precision, parse_quantity_with_precision},
+    parse::{
+        get_currency, parse_millis_timestamp, parse_price_with_precision,
+        parse_quantity_with_precision,
+    },
 };
 
 /// Parses a Bybit WebSocket topic string into its components.
@@ -332,14 +335,14 @@ pub fn parse_ticker_linear_funding(
     let funding_rate = funding_rate_str
         .as_str()
         .parse::<Decimal>()
-        .context("Invalid funding_rate value")?
+        .context("invalid funding_rate value")?
         .normalize();
 
     let next_funding_ns = if let Some(next_funding_time) = &data.next_funding_time {
         let next_funding_millis = next_funding_time
             .as_str()
             .parse::<i64>()
-            .context("Invalid next_funding_time value")?;
+            .context("invalid next_funding_time value")?;
         Some(parse_millis_i64(next_funding_millis, "next_funding_time")?)
     } else {
         None
@@ -643,17 +646,12 @@ pub fn parse_ws_position_status_report(
         PositionSideSpecified::Flat
     };
 
-    let avg_px_open = if let Some(ref avg_price) = position.avg_price {
-        if !avg_price.is_empty() && avg_price != "0" {
-            avg_price
-                .parse::<f64>()
-                .with_context(|| format!("Failed to parse avgPrice='{}' as f64", avg_price))?
-        } else {
-            0.0
-        }
-    } else {
-        0.0
-    };
+    let avg_px_open = position.entry_price.parse::<f64>().with_context(|| {
+        format!(
+            "Failed to parse entryPrice='{}' as f64",
+            position.entry_price
+        )
+    })?;
 
     let _unrealized_pnl = position.unrealised_pnl.parse::<f64>().with_context(|| {
         format!(
@@ -672,7 +670,7 @@ pub fn parse_ws_position_status_report(
     let ts_last = parse_millis_timestamp(&position.updated_time, "position.updatedTime")?;
 
     let avg_px_open_decimal = if avg_px_open != 0.0 {
-        Some(Decimal::try_from(avg_px_open).context("Failed to convert avg_px_open to Decimal")?)
+        Some(Decimal::try_from(avg_px_open).context("failed to convert avg_px_open to Decimal")?)
     } else {
         None
     };
@@ -704,7 +702,7 @@ pub fn parse_ws_account_state(
     let mut balances = Vec::new();
 
     for coin_data in &wallet.coin {
-        let currency = Currency::from(coin_data.coin.as_str());
+        let currency = get_currency(coin_data.coin.as_str());
 
         let wallet_balance_amount = coin_data.wallet_balance.parse::<f64>().with_context(|| {
             format!(
@@ -748,7 +746,7 @@ pub fn parse_ws_account_state(
         let free = Money::new(free_amount, currency);
 
         let balance = AccountBalance::new_checked(total, locked, free)
-            .context("Failed to create AccountBalance from wallet data")?;
+            .context("failed to create AccountBalance from wallet data")?;
         balances.push(balance);
     }
 
@@ -1091,13 +1089,13 @@ mod tests {
 
         assert_eq!(report.account_id, account_id);
         assert_eq!(report.instrument_id, instrument.id());
-        assert_eq!(report.position_side.as_position_side(), PositionSide::Long);
-        assert_eq!(report.quantity, instrument.make_qty(0.15, None));
+        assert_eq!(report.position_side.as_position_side(), PositionSide::Short);
+        assert_eq!(report.quantity, instrument.make_qty(0.01, None));
         assert_eq!(
             report.avg_px_open,
-            Some(Decimal::try_from(28500.50).unwrap())
+            Some(Decimal::try_from(3641.075).unwrap())
         );
-        assert_eq!(report.ts_last, UnixNanos::new(1_697_682_317_038_000_000));
+        assert_eq!(report.ts_last, UnixNanos::new(1_762_199_125_472_000_000));
         assert_eq!(report.ts_init, TS);
     }
 
@@ -1129,12 +1127,12 @@ mod tests {
         assert_eq!(report.account_id, account_id);
         assert_eq!(report.instrument_id.symbol.as_str(), "ETHUSDT-LINEAR");
         assert_eq!(report.position_side.as_position_side(), PositionSide::Short);
-        assert_eq!(report.quantity, instrument.make_qty(2.5, None));
+        assert_eq!(report.quantity, instrument.make_qty(0.01, None));
         assert_eq!(
             report.avg_px_open,
-            Some(Decimal::try_from(2450.75).unwrap())
+            Some(Decimal::try_from(3641.075).unwrap())
         );
-        assert_eq!(report.ts_last, UnixNanos::new(1_697_682_417_038_000_000));
+        assert_eq!(report.ts_last, UnixNanos::new(1_762_199_125_472_000_000));
         assert_eq!(report.ts_init, TS);
     }
 

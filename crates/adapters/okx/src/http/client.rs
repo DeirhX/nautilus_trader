@@ -99,9 +99,10 @@ use crate::{
         },
         models::OKXInstrument,
         parse::{
-            okx_instrument_type, parse_account_state, parse_candlestick, parse_fill_report,
-            parse_index_price_update, parse_instrument_any, parse_mark_price_update,
-            parse_order_status_report, parse_position_status_report, parse_trade_tick,
+            okx_instrument_type, okx_instrument_type_from_symbol, parse_account_state,
+            parse_candlestick, parse_fill_report, parse_index_price_update, parse_instrument_any,
+            parse_mark_price_update, parse_order_status_report, parse_position_status_report,
+            parse_trade_tick,
         },
     },
     http::{
@@ -1284,6 +1285,97 @@ impl OKXHttpClient {
         Ok(instruments)
     }
 
+    /// Requests a single instrument by `instrument_id` from OKX.
+    ///
+    /// Fetches the instrument from the API, caches it, and returns it.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The API request fails.
+    /// - The instrument is not found.
+    /// - Failed to parse instrument data.
+    pub async fn request_instrument(
+        &self,
+        instrument_id: InstrumentId,
+    ) -> anyhow::Result<InstrumentAny> {
+        let symbol = instrument_id.symbol.as_str();
+        let instrument_type = okx_instrument_type_from_symbol(symbol);
+
+        let mut params = GetInstrumentsParamsBuilder::default();
+        params.inst_type(instrument_type);
+        params.inst_id(symbol);
+
+        let params = params.build().map_err(|e| anyhow::anyhow!(e))?;
+
+        let resp = self
+            .inner
+            .get_instruments(params)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        let raw_inst = resp
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Instrument {symbol} not found"))?;
+
+        // Skip pre-open instruments which have incomplete/empty field values
+        if raw_inst.state == OKXInstrumentStatus::Preopen {
+            anyhow::bail!("Instrument {symbol} is in pre-open state");
+        }
+
+        let fee_rate_opt = {
+            let fee_params = GetTradeFeeParams {
+                inst_type: instrument_type,
+                uly: None,
+                inst_family: None,
+            };
+
+            match self.inner.get_trade_fee(fee_params).await {
+                Ok(rates) => rates.into_iter().next(),
+                Err(OKXHttpError::MissingCredentials) => {
+                    log::debug!("Missing credentials for fee rates, using None");
+                    None
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch fee rates for {symbol}: {e}");
+                    None
+                }
+            }
+        };
+
+        let (maker_fee, taker_fee) = if let Some(ref fee_rate) = fee_rate_opt {
+            let is_usdt_margined = raw_inst.ct_type == OKXContractType::Linear;
+            let (maker_str, taker_str) = if is_usdt_margined {
+                (&fee_rate.maker_u, &fee_rate.taker_u)
+            } else {
+                (&fee_rate.maker, &fee_rate.taker)
+            };
+
+            let maker = if !maker_str.is_empty() {
+                Decimal::from_str(maker_str).ok()
+            } else {
+                None
+            };
+            let taker = if !taker_str.is_empty() {
+                Decimal::from_str(taker_str).ok()
+            } else {
+                None
+            };
+
+            (maker, taker)
+        } else {
+            (None, None)
+        };
+
+        let ts_init = self.generate_ts_init();
+        let instrument = parse_instrument_any(raw_inst, None, None, maker_fee, taker_fee, ts_init)?
+            .ok_or_else(|| anyhow::anyhow!("Unsupported instrument type for {symbol}"))?;
+
+        self.cache_instrument(instrument.clone());
+
+        Ok(instrument)
+    }
+
     /// Requests the latest mark price for the `instrument_type` from OKX.
     ///
     /// # Errors
@@ -1355,6 +1447,10 @@ impl OKXHttpClient {
     /// # Errors
     ///
     /// Returns an error if the HTTP request fails or trade parsing fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the API returns an empty response when debug logging is enabled.
     pub async fn request_trades(
         &self,
         instrument_id: InstrumentId,
@@ -1362,43 +1458,310 @@ impl OKXHttpClient {
         end: Option<DateTime<Utc>>,
         limit: Option<u32>,
     ) -> anyhow::Result<Vec<TradeTick>> {
-        let mut params = GetTradesParamsBuilder::default();
-
-        params.inst_id(instrument_id.symbol.inner());
-        if let Some(s) = start {
-            params.after(s.timestamp_millis().to_string());
-        }
-        if let Some(e) = end {
-            params.before(e.timestamp_millis().to_string());
-        }
-        // OKX expects the optional `limit` parameter to be between 1 and 100 (default 100).
-        // The request layer uses 0 to express "no explicit limit", so we omit the field in that case
-        // and clamp any larger value to the documented maximum to avoid 51000 parameter errors.
         const OKX_TRADES_MAX_LIMIT: u32 = 100;
-        if let Some(l) = limit
-            && l > 0
-        {
-            params.limit(l.min(OKX_TRADES_MAX_LIMIT));
+
+        let limit = if limit == Some(0) { None } else { limit };
+
+        if let (Some(s), Some(e)) = (start, end) {
+            anyhow::ensure!(s < e, "Invalid time range: start={s:?} end={e:?}");
         }
 
-        let params = params.build().map_err(anyhow::Error::new)?;
+        let now = Utc::now();
 
-        // Fetch raw trades
-        let raw_trades = self
-            .inner
-            .get_history_trades(params)
-            .await
-            .map_err(anyhow::Error::new)?;
+        if let Some(s) = start
+            && s > now
+        {
+            return Ok(Vec::new());
+        }
+
+        let end = if let Some(e) = end
+            && e > now
+        {
+            Some(now)
+        } else {
+            end
+        };
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum Mode {
+            Latest,
+            Backward,
+            Range,
+        }
+
+        let mode = match (start, end) {
+            (None, None) => Mode::Latest,
+            (Some(_), None) => Mode::Backward,
+            (None, Some(_)) => Mode::Backward,
+            (Some(_), Some(_)) => Mode::Range,
+        };
+
+        let start_ms = start.map(|s| s.timestamp_millis());
+        let end_ms = end.map(|e| e.timestamp_millis());
 
         let ts_init = self.generate_ts_init();
         let inst = self
             .instrument_or_fetch(instrument_id.symbol.inner())
             .await?;
 
-        let mut trades = Vec::with_capacity(raw_trades.len());
-        for raw in raw_trades {
+        // Historical pagination walks backwards using trade IDs, OKX does not honour timestamps for
+        // standalone `before` requests (type=2)
+        if matches!(mode, Mode::Backward | Mode::Range) {
+            let mut before_trade_id: Option<String> = None;
+            let mut pages = 0usize;
+            let mut page_results: Vec<Vec<TradeTick>> = Vec::new();
+            let mut seen_trades: std::collections::HashSet<(String, i64)> =
+                std::collections::HashSet::new();
+            let mut unique_count = 0usize;
+            let mut consecutive_empty_pages = 0usize;
+            const MAX_PAGES: usize = 500;
+            const MAX_CONSECUTIVE_EMPTY: usize = 3;
+
+            // Only apply default limit when there's no start boundary
+            // (start provides a natural stopping point, end alone allows infinite backward pagination)
+            let effective_limit = if start.is_some() {
+                limit.unwrap_or(u32::MAX)
+            } else {
+                limit.unwrap_or(OKX_TRADES_MAX_LIMIT)
+            };
+
+            tracing::debug!(
+                "Starting trades pagination: mode={:?}, start={:?}, end={:?}, limit={:?}, effective_limit={}",
+                mode,
+                start,
+                end,
+                limit,
+                effective_limit
+            );
+
+            loop {
+                if pages >= MAX_PAGES {
+                    tracing::warn!("Hit MAX_PAGES limit of {}", MAX_PAGES);
+                    break;
+                }
+
+                if effective_limit < u32::MAX && unique_count >= effective_limit as usize {
+                    tracing::debug!("Reached effective limit: unique_count={}", unique_count);
+                    break;
+                }
+
+                let remaining = (effective_limit as usize).saturating_sub(unique_count);
+                let page_cap = remaining.min(OKX_TRADES_MAX_LIMIT as usize) as u32;
+
+                tracing::debug!(
+                    "Requesting page {}: before_id={:?}, page_cap={}, unique_count={}",
+                    pages + 1,
+                    before_trade_id,
+                    page_cap,
+                    unique_count
+                );
+
+                let mut params_builder = GetTradesParamsBuilder::default();
+                params_builder
+                    .inst_id(instrument_id.symbol.inner())
+                    .limit(page_cap)
+                    .pagination_type(1);
+
+                // Use 'after' to get older trades (OKX API: after=cursor means < cursor)
+                if let Some(ref before_id) = before_trade_id {
+                    params_builder.after(before_id.clone());
+                }
+
+                let params = params_builder.build().map_err(anyhow::Error::new)?;
+                let raw = self
+                    .inner
+                    .get_history_trades(params)
+                    .await
+                    .map_err(anyhow::Error::new)?;
+
+                tracing::debug!("Received {} raw trades from API", raw.len());
+
+                if !raw.is_empty() {
+                    let first_id = &raw.first().unwrap().trade_id;
+                    let last_id = &raw.last().unwrap().trade_id;
+                    tracing::debug!(
+                        "Raw response trade ID range: first={} (newest), last={} (oldest)",
+                        first_id,
+                        last_id
+                    );
+                }
+
+                if raw.is_empty() {
+                    tracing::debug!("API returned empty page, stopping pagination");
+                    break;
+                }
+
+                pages += 1;
+
+                let mut page_trades: Vec<TradeTick> = Vec::with_capacity(raw.len());
+                let mut hit_start_boundary = false;
+                let mut filtered_out = 0usize;
+                let mut duplicates = 0usize;
+
+                for r in &raw {
+                    match parse_trade_tick(
+                        r,
+                        instrument_id,
+                        inst.price_precision(),
+                        inst.size_precision(),
+                        ts_init,
+                    ) {
+                        Ok(trade) => {
+                            let ts_ms = trade.ts_event.as_i64() / 1_000_000;
+
+                            if let Some(e_ms) = end_ms
+                                && ts_ms > e_ms
+                            {
+                                filtered_out += 1;
+                                continue;
+                            }
+
+                            if let Some(s_ms) = start_ms
+                                && ts_ms < s_ms
+                            {
+                                hit_start_boundary = true;
+                                filtered_out += 1;
+                                break;
+                            }
+
+                            let trade_key = (trade.trade_id.to_string(), trade.ts_event.as_i64());
+                            if seen_trades.insert(trade_key) {
+                                unique_count += 1;
+                                page_trades.push(trade);
+                            } else {
+                                duplicates += 1;
+                            }
+                        }
+                        Err(e) => tracing::error!("{e}"),
+                    }
+                }
+
+                tracing::debug!(
+                    "Page {} processed: {} trades kept, {} filtered out, {} duplicates, hit_start_boundary={}",
+                    pages,
+                    page_trades.len(),
+                    filtered_out,
+                    duplicates,
+                    hit_start_boundary
+                );
+
+                // Extract oldest unique trade ID for next page cursor
+                let oldest_trade_id = if !page_trades.is_empty() {
+                    // Use oldest deduplicated trade ID before reversing
+                    let oldest_id = page_trades.last().map(|t| {
+                        let id = t.trade_id.to_string();
+                        tracing::debug!(
+                            "Setting cursor from deduplicated trades: oldest_id={}, ts_event={}",
+                            id,
+                            t.ts_event.as_i64()
+                        );
+                        id
+                    });
+                    page_trades.reverse();
+                    page_results.push(page_trades);
+                    consecutive_empty_pages = 0;
+                    oldest_id
+                } else {
+                    // Only apply consecutive empty guard if we've already collected some trades
+                    // This allows historical backfills to paginate through empty prelude
+                    if unique_count > 0 {
+                        consecutive_empty_pages += 1;
+                        if consecutive_empty_pages >= MAX_CONSECUTIVE_EMPTY {
+                            tracing::debug!(
+                                "Stopping: {} consecutive pages with no trades in range after collecting {} trades",
+                                consecutive_empty_pages,
+                                unique_count
+                            );
+                            break;
+                        }
+                    }
+                    // No unique trades on page, use raw response for cursor
+                    raw.last().map(|t| {
+                        let id = t.trade_id.to_string();
+                        tracing::debug!(
+                            "Setting cursor from raw response (no unique trades): oldest_id={}",
+                            id
+                        );
+                        id
+                    })
+                };
+
+                if let Some(ref old_id) = before_trade_id
+                    && oldest_trade_id.as_ref() == Some(old_id)
+                {
+                    break;
+                }
+
+                if oldest_trade_id.is_none() {
+                    break;
+                }
+
+                before_trade_id = oldest_trade_id;
+
+                if hit_start_boundary {
+                    break;
+                }
+
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+
+            tracing::debug!(
+                "Pagination complete: {} pages, {} unique trades collected",
+                pages,
+                unique_count
+            );
+
+            let mut out: Vec<TradeTick> = Vec::new();
+            for page in page_results.into_iter().rev() {
+                out.extend(page);
+            }
+
+            // Deduplicate by (trade_id, ts_event) composite key
+            let mut dedup_keys = std::collections::HashSet::new();
+            let pre_dedup_len = out.len();
+            out.retain(|trade| {
+                dedup_keys.insert((trade.trade_id.to_string(), trade.ts_event.as_i64()))
+            });
+
+            if out.len() < pre_dedup_len {
+                tracing::debug!(
+                    "Removed {} duplicate trades during final dedup",
+                    pre_dedup_len - out.len()
+                );
+            }
+
+            if let Some(lim) = limit
+                && lim > 0
+                && out.len() > lim as usize
+            {
+                let excess = out.len() - lim as usize;
+                tracing::debug!("Trimming {} oldest trades to respect limit={}", excess, lim);
+                out.drain(0..excess);
+            }
+
+            tracing::debug!("Returning {} trades", out.len());
+            return Ok(out);
+        }
+
+        let req_limit = limit
+            .unwrap_or(OKX_TRADES_MAX_LIMIT)
+            .min(OKX_TRADES_MAX_LIMIT);
+        let params = GetTradesParamsBuilder::default()
+            .inst_id(instrument_id.symbol.inner())
+            .limit(req_limit)
+            .build()
+            .map_err(anyhow::Error::new)?;
+
+        let raw = self
+            .inner
+            .get_history_trades(params)
+            .await
+            .map_err(anyhow::Error::new)?;
+
+        let mut trades: Vec<TradeTick> = Vec::with_capacity(raw.len());
+        for r in &raw {
             match parse_trade_tick(
-                &raw,
+                r,
                 instrument_id,
                 inst.price_precision(),
                 inst.size_precision(),
@@ -1407,6 +1770,16 @@ impl OKXHttpClient {
                 Ok(trade) => trades.push(trade),
                 Err(e) => tracing::error!("{e}"),
             }
+        }
+
+        // OKX returns newest-first, reverse to oldest-first
+        trades.reverse();
+
+        if let Some(lim) = limit
+            && lim > 0
+            && trades.len() > lim as usize
+        {
+            trades.drain(0..trades.len() - lim as usize);
         }
 
         Ok(trades)
@@ -1478,6 +1851,7 @@ impl OKXHttpClient {
         }
 
         let now = Utc::now();
+
         if let Some(s) = start
             && s > now
         {
@@ -1554,18 +1928,17 @@ impl OKXHttpClient {
         let mut out: Vec<Bar> = Vec::new();
         let mut pages = 0usize;
 
-        // IMPORTANT: OKX API behavior:
-        // - With 'after' parameter: returns bars with timestamp > after (going forward)
-        // - With 'before' parameter: returns bars with timestamp < before (going backward)
-        // For Range mode, we use 'before' starting from the end time to get bars before it
-        let mut after_ms: Option<i64> = None;
+        // IMPORTANT: OKX API has COUNTER-INTUITIVE semantics (same for bars and trades):
+        // - after=X returns records with timestamp < X (upper bound, despite the name!)
+        // - before=X returns records with timestamp > X (lower bound, despite the name!)
+        // For Range [start, end], use: before=start (lower bound), after=end (upper bound)
+        let mut after_ms: Option<i64> = match mode {
+            Mode::Range => end_ms.or(Some(now_ms)), // Upper bound: bars < end
+            _ => None,
+        };
         let mut before_ms: Option<i64> = match mode {
             Mode::Backward => end_ms.map(|v| v.saturating_sub(1)),
-            Mode::Range => {
-                // For Range, start from the end time (or current time if no end specified)
-                // The API will return bars with timestamp < before_ms
-                Some(end_ms.unwrap_or(now_ms))
-            }
+            Mode::Range => start_ms, // Lower bound: bars > start
             Mode::Latest => None,
         };
 
@@ -1640,24 +2013,20 @@ impl OKXHttpClient {
                     }
                 }
                 Mode::Backward => {
+                    // Use 'after' to get older bars (OKX API: after=cursor means < cursor)
                     if let Some(b) = before_ms {
-                        p.before_ms(b);
-                        req_used_before = true;
+                        p.after_ms(b);
                     }
                 }
                 Mode::Range => {
-                    // For first request with regular endpoint, try without parameters
-                    // to get the most recent bars, then filter
-                    if pages == 0 && !using_history {
-                        // Don't set any time parameters on first request
-                        // This gets the most recent bars available
-                    } else if forward_prepend_mode {
-                        if let Some(b) = before_ms {
-                            p.before_ms(b);
-                            req_used_before = true;
-                        }
-                    } else if let Some(a) = after_ms {
+                    // For Range mode, use both after and before to specify the full range
+                    // This is much more efficient than pagination
+                    if let Some(a) = after_ms {
                         p.after_ms(a);
+                    }
+                    if let Some(b) = before_ms {
+                        p.before_ms(b);
+                        req_used_before = true;
                     }
                 }
             }
@@ -1885,9 +2254,9 @@ impl OKXHttpClient {
                 }
             }
 
-            // Duplicate-window mitigation for Latest/Backward
+            // Duplicate-window mitigation for Latest/Backward/Range
             if contribution == 0
-                && matches!(mode, Mode::Latest | Mode::Backward)
+                && matches!(mode, Mode::Latest | Mode::Backward | Mode::Range)
                 && let Some(b) = before_ms
             {
                 let jump = (page_cap as i64).saturating_mul(slot_ms.max(1));
@@ -2627,6 +2996,12 @@ impl OKXHttpClient {
 
         Ok(reports.into_iter().next())
     }
+
+    /// Exposes raw HTTP client for testing purposes
+    pub fn raw_client(&self) -> &Arc<OKXRawHttpClient> {
+        &self.inner
+    }
+
     async fn collect_algo_reports(
         &self,
         account_id: AccountId,

@@ -56,6 +56,7 @@ from nautilus_trader.live.execution_client import LiveExecutionClient
 from nautilus_trader.model.enums import AccountType
 from nautilus_trader.model.enums import OmsType
 from nautilus_trader.model.enums import OrderStatus
+from nautilus_trader.model.enums import OrderType
 from nautilus_trader.model.events import AccountState
 from nautilus_trader.model.events import OrderCancelRejected
 from nautilus_trader.model.events import OrderModifyRejected
@@ -660,6 +661,19 @@ class BybitExecutionClient(LiveExecutionClient):
 
     # -- COMMAND HANDLERS -------------------------------------------------------------------------
 
+    def _check_order_validity(
+        self,
+        order: Order,
+        product_type: BybitProductType,
+    ) -> str | None:
+        if order.is_post_only and order.order_type != OrderType.LIMIT:
+            return "UNSUPPORTED_POST_ONLY"
+
+        if order.is_reduce_only and product_type == BybitProductType.SPOT:
+            return "UNSUPPORTED_REDUCE_ONLY_SPOT"
+
+        return None
+
     async def _query_account(self, _command: QueryAccount) -> None:
         await self._update_account_state()
 
@@ -668,6 +682,20 @@ class BybitExecutionClient(LiveExecutionClient):
 
         if order.is_closed:
             self._log.warning(f"Cannot submit already closed order: {order}")
+            return
+
+        product_type = nautilus_pyo3.bybit_product_type_from_symbol(
+            order.instrument_id.symbol.value,
+        )
+
+        if reason := self._check_order_validity(order, product_type):
+            self.generate_order_denied(
+                strategy_id=order.strategy_id,
+                instrument_id=order.instrument_id,
+                client_order_id=order.client_order_id,
+                reason=reason,
+                ts_event=self._clock.timestamp_ns(),
+            )
             return
 
         # Generate OrderSubmitted event
@@ -692,8 +720,9 @@ class BybitExecutionClient(LiveExecutionClient):
         if order.has_trigger_price:
             pyo3_trigger_price = nautilus_pyo3.Price.from_str(str(order.trigger_price))
 
-        product_type = nautilus_pyo3.bybit_product_type_from_symbol(
-            order.instrument_id.symbol.value,
+        is_leverage = command.params.get("is_leverage", False) if command.params else False
+        is_quote_quantity = (
+            order.is_quote_quantity if hasattr(order, "is_quote_quantity") else False
         )
 
         try:
@@ -705,11 +734,13 @@ class BybitExecutionClient(LiveExecutionClient):
                 order_side=pyo3_order_side,
                 order_type=pyo3_order_type,
                 quantity=pyo3_quantity,
+                is_quote_quantity=is_quote_quantity,
                 time_in_force=pyo3_time_in_force,
                 price=pyo3_price,
                 trigger_price=pyo3_trigger_price,
                 post_only=order.is_post_only,
                 reduce_only=order.is_reduce_only,
+                is_leverage=is_leverage,
             )
         except Exception as e:
             self._log.error(f"Failed to submit order {order.client_order_id}: {e}")
@@ -727,12 +758,28 @@ class BybitExecutionClient(LiveExecutionClient):
         if not command.order_list.orders:
             return
 
+        is_leverage = command.params.get("is_leverage", False) if command.params else False
+
         now_ns = self._clock.timestamp_ns()
         order_params = []
 
         for order in command.order_list.orders:
             if order.is_closed:
                 self._log.warning(f"Cannot submit already closed order: {order}")
+                continue
+
+            product_type = nautilus_pyo3.bybit_product_type_from_symbol(
+                order.instrument_id.symbol.value,
+            )
+
+            if reason := self._check_order_validity(order, product_type):
+                self.generate_order_denied(
+                    strategy_id=order.strategy_id,
+                    instrument_id=order.instrument_id,
+                    client_order_id=order.client_order_id,
+                    reason=reason,
+                    ts_event=now_ns,
+                )
                 continue
 
             self.generate_order_submitted(
@@ -758,9 +805,8 @@ class BybitExecutionClient(LiveExecutionClient):
 
             post_only = order.is_post_only
             reduce_only = order.is_reduce_only
-
-            product_type = nautilus_pyo3.bybit_product_type_from_symbol(
-                order.instrument_id.symbol.value,
+            is_quote_quantity = (
+                order.is_quote_quantity if hasattr(order, "is_quote_quantity") else False
             )
 
             params = self._ws_trade_client.build_place_order_params(
@@ -770,11 +816,13 @@ class BybitExecutionClient(LiveExecutionClient):
                 order_side=pyo3_order_side,
                 order_type=pyo3_order_type,
                 quantity=pyo3_quantity,
+                is_quote_quantity=is_quote_quantity,
                 time_in_force=pyo3_time_in_force,
                 price=pyo3_price,
                 trigger_price=pyo3_trigger_price,
                 post_only=post_only,
                 reduce_only=reduce_only,
+                is_leverage=is_leverage,
             )
             order_params.append(params)
 

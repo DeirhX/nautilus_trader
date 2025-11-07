@@ -66,7 +66,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod backoff;
-pub mod fix;
 pub mod http;
 pub mod mode;
 pub mod net;
@@ -83,5 +82,5 @@ pub mod python;
 pub mod error;
 pub mod ratelimiter;
 
-/// Sentinel message to signal reconnection to Rust consumers.
+/// Sentinel message to signal reconnection completion to Rust consumers.
 pub const RECONNECTED: &str = "__RECONNECTED__";

@@ -5907,11 +5907,13 @@ class BybitWebSocketClient:
         order_side: OrderSide,
         order_type: OrderType,
         quantity: Quantity,
+        is_quote_quantity: bool = False,
         time_in_force: TimeInForce | None = None,
         price: Price | None = None,
         trigger_price: Price | None = None,
         post_only: bool | None = None,
         reduce_only: bool | None = None,
+        is_leverage: bool = False,
     ) -> None: ...
     async def modify_order(
         self,
@@ -5944,11 +5946,13 @@ class BybitWebSocketClient:
         order_side: OrderSide,
         order_type: OrderType,
         quantity: Quantity,
+        is_quote_quantity: bool = False,
         time_in_force: TimeInForce | None = None,
         price: Price | None = None,
         trigger_price: Price | None = None,
         post_only: bool | None = None,
         reduce_only: bool | None = None,
+        is_leverage: bool = False,
     ) -> BybitWsPlaceOrderParams: ...
     def build_amend_order_params(
         self,
@@ -5974,6 +5978,7 @@ class BybitWsPlaceOrderParams:
     side: str
     order_type: str
     qty: str
+    is_leverage: int | None
     market_unit: str | None
     price: str | None
     time_in_force: str | None
@@ -6712,6 +6717,7 @@ class OKXHttpClient:
     def cache_instrument(self, instrument: Instrument) -> None: ...
     def cancel_all_requests(self) -> None: ...
     async def set_position_mode(self, mode: OKXPositionMode) -> None: ...
+    async def request_instrument(self, instrument_id: InstrumentId) -> Instrument: ...
     async def request_instruments(
         self, instrument_type: OKXInstrumentType, instrument_family: str | None = None
     ) -> list[Instrument]: ...
