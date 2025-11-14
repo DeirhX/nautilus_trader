@@ -370,7 +370,9 @@ class PolymarketDataClient(LiveMarketDataClient):
             )
             return
 
-        if command.instrument_id not in self._local_books:
+        # Only create local book if NOT in OPTIMIZED mode (where we skip maintenance for delta-only)
+        # In OPTIMIZED mode, book will be created only when switching to quotes (if needed)
+        if command.instrument_id not in self._local_books and not self._config.optimize_for_deltas_only:
             self._create_local_book(command.instrument_id)
 
         await self._subscribe_asset_book(command.instrument_id)
@@ -379,7 +381,57 @@ class PolymarketDataClient(LiveMarketDataClient):
         self._update_subscription_cache(command.instrument_id)
 
     async def _subscribe_quote_ticks(self, command: SubscribeQuoteTicks) -> None:
-        if command.instrument_id not in self._local_books:
+        # Check if switching from delta-only to quotes in OPTIMIZED mode
+        switching_from_deltas_only = (
+            self._config.optimize_for_deltas_only
+            and command.instrument_id not in self._local_books  # No local book (was optimized)
+            and command.instrument_id in self.subscribed_order_book_deltas()  # Already subscribed to deltas
+        )
+        
+        if switching_from_deltas_only:
+            # WORKAROUND: In OPTIMIZED mode, local book wasn't maintained for delta-only subscriptions
+            # Now user wants quotes, which need a complete local book
+            # 
+            # Solution: Copy from cache book (which DataEngine maintains from our delta publishes)
+            # 
+            # Alternative approach (more expensive): Could force websocket reconnection to get
+            # fresh snapshot, but that would disrupt all other subscriptions. Cache copy is faster.
+            
+            cache_book = self._cache.order_book(command.instrument_id)
+            
+            if cache_book is not None:
+                self._log.info(
+                    f"Switching {command.instrument_id} from delta-only → quotes in OPTIMIZED mode. "
+                    f"Rebuilding local book from cache ({cache_book.count} orders).",
+                    LogColor.CYAN,
+                )
+                
+                # Clone cache book to local book
+                local_book = self._create_local_book(command.instrument_id)
+                
+                # Copy all orders (DataEngine cache book is complete from delta publishes)
+                for order in cache_book.bids():
+                    local_book.add(order)
+                for order in cache_book.asks():
+                    local_book.add(order)
+                    
+                self._log.info(
+                    f"Local book rebuilt successfully: {local_book.count} orders. "
+                    f"Quote generation will now work correctly.",
+                    LogColor.GREEN,
+                )
+            else:
+                # Cache book doesn't exist (shouldn't happen - we've been publishing deltas)
+                self._log.warning(
+                    f"Cannot rebuild local book for {command.instrument_id}: cache book not found. "
+                    f"This shouldn't happen - deltas should have populated cache. "
+                    f"Quote generation may be incorrect until next websocket reconnection.",
+                    LogColor.YELLOW,
+                )
+                self._create_local_book(command.instrument_id)
+        elif command.instrument_id not in self._local_books:
+            # Normal case: first subscription, create empty book
+            # Will be populated by websocket snapshot on subscription
             self._create_local_book(command.instrument_id)
 
         await self._subscribe_asset_book(command.instrument_id)
@@ -544,23 +596,33 @@ class PolymarketDataClient(LiveMarketDataClient):
             self._handle_data(quote)
 
     def _handle_deltas(self, instrument: BinaryOption, deltas: OrderBookDeltas) -> None:
-        # Always maintain local book for quote generation
-        book_old = self._local_books.get(instrument.id)
-        book_new = OrderBook(instrument.id, book_type=BookType.L2_MBP)
-        book_new.apply_deltas(deltas)
-        self._local_books[instrument.id] = book_new
+        # Maintain local book based on subscription mode and optimization setting
+        # - SAFE mode (optimize_for_deltas_only=False): Always maintain
+        # - OPTIMIZED mode + subscribed to quotes: Maintain (needed for quote generation)
+        # - OPTIMIZED mode + delta-only: Skip (performance optimization)
+        
+        should_maintain_book = (
+            not self._config.optimize_for_deltas_only  # SAFE mode: always maintain
+            or instrument.id in self.subscribed_quote_ticks()  # Need for quote generation
+        )
+        
+        if should_maintain_book:
+            book_old = self._local_books.get(instrument.id)
+            book_new = OrderBook(instrument.id, book_type=BookType.L2_MBP)
+            book_new.apply_deltas(deltas)
+            self._local_books[instrument.id] = book_new
 
-        if self._config.compute_effective_deltas and book_old is not None:
-            # Compute effective deltas (reduce snapshot based on old and new book states),
-            # prioritizing a smaller data footprint over computational efficiency.
-            t0 = self._clock.timestamp_ns()
-            deltas = compute_effective_deltas(book_old, book_new, instrument)
+            if self._config.compute_effective_deltas and book_old is not None:
+                # Compute effective deltas (reduce snapshot based on old and new book states),
+                # prioritizing a smaller data footprint over computational efficiency.
+                t0 = self._clock.timestamp_ns()
+                deltas = compute_effective_deltas(book_old, book_new, instrument)
 
-            interval_ms = (self._clock.timestamp_ns() - t0) / 1_000_000
-            self._log.debug(f"Computed effective deltas in {interval_ms:.3f}ms")
-            # self._log.warning(book_new.pprint())  # Uncomment for development
+                interval_ms = (self._clock.timestamp_ns() - t0) / 1_000_000
+                self._log.debug(f"Computed effective deltas in {interval_ms:.3f}ms")
+                # self._log.warning(book_new.pprint())  # Uncomment for development
 
-        # Check if any effective deltas remain
+        # Publish deltas (always done, even if we skipped local book maintenance)
         if deltas:
             self._handle_data(deltas)
 
