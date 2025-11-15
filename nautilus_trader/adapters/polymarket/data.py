@@ -241,7 +241,6 @@ class PolymarketDataClient(LiveMarketDataClient):
 
     def _update_subscription_cache(self, instrument_id: InstrumentId) -> None:
         """Update cached subscription mode for faster lookups in hot path."""
-        self._log.debug(f"Updating subscription cache for {instrument_id}")
         subscribed_to_deltas = instrument_id in self.subscribed_order_book_deltas()
         subscribed_to_quotes = instrument_id in self.subscribed_quote_ticks()
         
@@ -393,8 +392,8 @@ class PolymarketDataClient(LiveMarketDataClient):
 
         await self._subscribe_asset_book(command.instrument_id)
         
-        # Update subscription mode cache
-        self._update_subscription_cache(command.instrument_id)
+        # Skip cache update during subscription - it will be populated lazily on first use
+        # This significantly speeds up bulk subscriptions (8000+ instruments)
 
     async def _subscribe_quote_ticks(self, command: SubscribeQuoteTicks) -> None:
         # Check if switching from delta-only to quotes in OPTIMIZED mode
@@ -454,8 +453,8 @@ class PolymarketDataClient(LiveMarketDataClient):
 
         await self._subscribe_asset_book(command.instrument_id)
         
-        # Update subscription mode cache
-        self._update_subscription_cache(command.instrument_id)
+        # Skip cache update during subscription - it will be populated lazily on first use
+        # This significantly speeds up bulk subscriptions (8000+ instruments)
 
     async def _subscribe_trade_ticks(self, command: SubscribeTradeTicks) -> None:
         await self._subscribe_asset_book(command.instrument_id)
