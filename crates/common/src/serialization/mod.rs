@@ -13,10 +13,7 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-pub mod burn;
-pub mod collect;
-pub mod flash;
-pub mod initialize;
-pub mod mint;
-pub mod pool_created;
-pub mod swap;
+//! Serialization implementations for Nautilus common types.
+
+#[cfg(feature = "capnp")]
+pub mod capnp;
