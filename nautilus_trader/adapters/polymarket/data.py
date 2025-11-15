@@ -181,6 +181,11 @@ class PolymarketDataClient(LiveMarketDataClient):
         
         # Instrument reference cache (avoid repeated cache lookups)
         self._instrument_cache: dict[InstrumentId, BinaryOption] = {}
+        
+        # Track instruments that have transitioned to full order book mode
+        # Once an instrument is in this set, we NEVER stop maintaining its book
+        # (one-way transition for safety - prevents empty book after quote subscription)
+        self._full_book_mode: set[InstrumentId] = set()
 
     async def _connect(self) -> None:
         self._log.info("Initializing instruments...")
@@ -370,9 +375,20 @@ class PolymarketDataClient(LiveMarketDataClient):
             )
             return
 
-        # Only create local book if NOT in OPTIMIZED mode (where we skip maintenance for delta-only)
-        # In OPTIMIZED mode, book will be created only when switching to quotes (if needed)
-        if command.instrument_id not in self._local_books and not self._config.optimize_for_deltas_only:
+        # Only create local book if:
+        # - SAFE mode (always maintain), OR
+        # - Permanently in full book mode (one-way transition from delta-only → quotes), OR
+        # - Already subscribed to quotes (need for quote generation)
+        # 
+        # In OPTIMIZED delta-only mode, we intentionally skip creating the book
+        # to save memory and CPU. It will be created later if user subscribes to quotes.
+        should_create_book = (
+            not self._config.optimize_for_deltas_only  # SAFE mode
+            or command.instrument_id in self._full_book_mode  # Permanent full book mode
+            or command.instrument_id in self.subscribed_quote_ticks()  # Need for quotes
+        )
+        
+        if should_create_book and command.instrument_id not in self._local_books:
             self._create_local_book(command.instrument_id)
 
         await self._subscribe_asset_book(command.instrument_id)
@@ -389,23 +405,23 @@ class PolymarketDataClient(LiveMarketDataClient):
         )
         
         if switching_from_deltas_only:
-            # WORKAROUND: In OPTIMIZED mode, local book wasn't maintained for delta-only subscriptions
-            # Now user wants quotes, which need a complete local book
+            # TRANSITION: Switching from delta-only mode to full order book mode
+            # This is a ONE-WAY PERMANENT transition - once we need quotes, we always maintain full book
             # 
-            # Solution: Copy from cache book (which DataEngine maintains from our delta publishes)
-            # 
-            # Alternative approach (more expensive): Could force websocket reconnection to get
-            # fresh snapshot, but that would disrupt all other subscriptions. Cache copy is faster.
+            # Problem: We can't get a new websocket snapshot (already subscribed to this asset)
+            # Solution: Rebuild local book from DataEngine cache (which we've been populating via deltas)
+            
+            self._log.info(
+                f"Transitioning {command.instrument_id} from delta-only → FULL ORDER BOOK mode. ",
+                LogColor.CYAN,
+            )
+            
+            # Mark as permanently in full book mode (one-way transition)
+            self._full_book_mode.add(command.instrument_id)
             
             cache_book = self._cache.order_book(command.instrument_id)
             
-            if cache_book is not None:
-                self._log.info(
-                    f"Switching {command.instrument_id} from delta-only → quotes in OPTIMIZED mode. "
-                    f"Rebuilding local book from cache ({cache_book.count} orders).",
-                    LogColor.CYAN,
-                )
-                
+            if cache_book is not None and cache_book.count > 0:
                 # Clone cache book to local book
                 local_book = self._create_local_book(command.instrument_id)
                 
@@ -416,17 +432,19 @@ class PolymarketDataClient(LiveMarketDataClient):
                     local_book.add(order)
                     
                 self._log.info(
-                    f"Local book rebuilt successfully: {local_book.count} orders. "
-                    f"Quote generation will now work correctly.",
+                    f"Local book rebuilt from cache: {local_book.count} orders "
+                    f"({len(list(cache_book.bids()))} bids, {len(list(cache_book.asks()))} asks). "
+                    f"Quote generation enabled.",
                     LogColor.GREEN,
                 )
             else:
-                # Cache book doesn't exist (shouldn't happen - we've been publishing deltas)
-                self._log.warning(
-                    f"Cannot rebuild local book for {command.instrument_id}: cache book not found. "
-                    f"This shouldn't happen - deltas should have populated cache. "
-                    f"Quote generation may be incorrect until next websocket reconnection.",
-                    LogColor.YELLOW,
+                # Cache book doesn't exist or is empty - this is a problem
+                self._log.error(
+                    f"Cannot rebuild local book for {command.instrument_id}: "
+                    f"cache book {'empty' if cache_book else 'not found'}. "
+                    f"This indicates deltas haven't been properly published to cache. "
+                    f"Creating empty book - quotes will be incorrect until data arrives.",
+                    LogColor.RED,
                 )
                 self._create_local_book(command.instrument_id)
         elif command.instrument_id not in self._local_books:
@@ -598,11 +616,13 @@ class PolymarketDataClient(LiveMarketDataClient):
     def _handle_deltas(self, instrument: BinaryOption, deltas: OrderBookDeltas) -> None:
         # Maintain local book based on subscription mode and optimization setting
         # - SAFE mode (optimize_for_deltas_only=False): Always maintain
+        # - OPTIMIZED mode + in full_book_mode: Always maintain (one-way transition, never go back)
         # - OPTIMIZED mode + subscribed to quotes: Maintain (needed for quote generation)
         # - OPTIMIZED mode + delta-only: Skip (performance optimization)
         
         should_maintain_book = (
             not self._config.optimize_for_deltas_only  # SAFE mode: always maintain
+            or instrument.id in self._full_book_mode  # Permanent full book mode (one-way transition)
             or instrument.id in self.subscribed_quote_ticks()  # Need for quote generation
         )
         
