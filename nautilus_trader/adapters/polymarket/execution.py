@@ -734,7 +734,12 @@ class PolymarketExecutionClient(LiveExecutionClient):
                 filled_user_order_id=order_id,
             )
             fill_key = (report.trade_id, report.venue_order_id)
-            assert fill_key not in parsed_fill_keys, "duplicate (trade_id, venue_order_id)"
+            if fill_key in parsed_fill_keys:
+                self._log.warning(
+                    f"Skipping duplicate trade: trade_id={report.trade_id}, "
+                    f"venue_order_id={report.venue_order_id}"
+                )
+                continue
             parsed_fill_keys.add(fill_key)
             reports.append(report)
 
