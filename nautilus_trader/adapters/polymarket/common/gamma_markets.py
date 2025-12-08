@@ -147,11 +147,19 @@ async def iter_markets(
 ) -> AsyncGenerator[dict[str, Any]]:
     """
     Iterate markets that pass server-side filters, yielding raw market dicts.
+    
+    Note: We continue fetching until we get 0 results, not just fewer than limit.
+    This handles the case where markets end during fetching (e.g., requesting 500
+    but getting 499 because one market ended while fetching).
     """
     base = _normalize_base_url(base_url)
     params = build_markets_query(filters)
     limit = int(filters.get("limit", 500)) if filters else 500
     offset = int(filters.get("offset", 0)) if filters else 0
+
+    # Track consecutive small pages to detect true end of pagination
+    consecutive_small_pages = 0
+    max_consecutive_small_pages = 2  # Stop after 2 consecutive pages with < limit results
 
     while True:
         markets = await _request_markets_page(
@@ -162,12 +170,26 @@ async def iter_markets(
             limit=limit,
             timeout=timeout,
         )
+        
+        # Stop only when we get 0 results
         if not markets:
             break
+        
         for market in markets:
             yield market
+        
+        # Track small pages (fewer than requested limit)
         if len(markets) < limit:
-            break
+            consecutive_small_pages += 1
+            
+            # Stop only after multiple consecutive small pages
+            # This handles cases where markets end during fetching
+            if consecutive_small_pages >= max_consecutive_small_pages:
+                break
+        else:
+            # Reset counter when we get a full page
+            consecutive_small_pages = 0
+        
         offset += limit
 
 
